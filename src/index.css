@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+    .job-card {
+        @apply bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border-l-4 hover:shadow-lg transition-shadow;
+    }
+
+    .job-card.wishlist {
+        @apply border-l-blue-500;
+    }
+
+    .job-card.applied {
+        @apply border-l-yellow-500;
+    }
+
+    .job-card.follow-up {
+        @apply border-l-purple-500;
+    }
+
+    .job-card.interview {
+        @apply border-l-orange-500;
+    }
+
+    .job-card.offer {
+        @apply border-l-green-500;
+    }
+
+    .job-card.rejected {
+        @apply border-l-red-500;
+    }
+
+    .kanban-column {
+        @apply bg-gray-100 dark:bg-gray-900 rounded-lg p-4 min-h-screen max-h-screen overflow-y-auto flex-1;
+    }
+
+    .btn-primary {
+        @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors;
+    }
+
+    .btn-secondary {
+        @apply bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 rounded-lg transition-colors;
+    }
+
+    .btn-danger {
+        @apply bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors;
+    }
+}
