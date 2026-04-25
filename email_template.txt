@@ -1,0 +1,15 @@
+Subject:
+
+Application for {Role} Opportunity
+
+Body:
+
+Hi {RecruiterName},
+
+I saw your requirement for {Role}. My experience aligns well.
+
+Please find my resume attached.
+
+Regards,
+
+Naresh

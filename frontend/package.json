@@ -1,0 +1,1 @@
+{"name":"jobpilot-frontend","private":true,"version":"3.0.0","scripts":{"dev":"vite","build":"vite build"},"dependencies":{"react":"^18.2.0","react-dom":"^18.2.0","axios":"^1.6.0"},"devDependencies":{"vite":"^5.0.0","typescript":"^5.0.0"}}
