@@ -1,6 +1,15 @@
+import sys
+import asyncio
+
+# MUST be first on Windows
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv, set_key
+from fastapi.responses import FileResponse
+from app.whatsapp import wa_engine
 import os
 import shutil
 import smtplib
@@ -8,6 +17,7 @@ import re
 import fitz
 import json
 from email.message import EmailMessage
+import traceback
 
 load_dotenv()
 
@@ -23,6 +33,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+watch_task = None
+
+dashboard_jobs = []
+
+dashboard_summary = {
+    "total_jobs": 0,
+    "applied": 0,
+    "rejected": 0,
+    "blocked": 0,
+    "low_match": 0,
+    "success_rate": 0,
+}
 # =====================================================
 # ENV
 # =====================================================
@@ -540,3 +563,260 @@ async def auto_apply(
         },
         "jobs": results,
     }
+
+
+@app.get("/api/dashboard")
+async def get_dashboard():
+    return {"summary": dashboard_summary, "jobs": dashboard_jobs}
+
+
+# ---------------------------------------------
+# WhatsApp Status
+# ---------------------------------------------
+@app.get("/api/whatsapp/status")
+async def whatsapp_status():
+    try:
+        if wa_engine.page:
+            logged = await wa_engine.is_logged_in()
+            return {"connected": logged}
+
+        return {"connected": False}
+
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+
+# ---------------------------------------------
+# Start WhatsApp Browser
+# ---------------------------------------------
+@app.post("/api/whatsapp/connect")
+async def whatsapp_connect():
+    try:
+        print("Launching WhatsApp...")
+
+        if not wa_engine.page:
+            await wa_engine.start()
+
+        return {"success": True, "message": "Started"}
+
+    except Exception as e:
+        err = traceback.format_exc()
+
+        print(err)
+
+        return {"success": False, "error": err}
+
+
+# ---------------------------------------------
+# Get QR
+# ---------------------------------------------
+@app.get("/api/whatsapp/qr")
+async def whatsapp_qr():
+    try:
+        path = await wa_engine.get_qr()
+
+        if not path:
+            return {"error": "QR not ready"}
+
+        return FileResponse(path, media_type="image/png")
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------
+# Wait for Login
+# ---------------------------------------------
+@app.get("/api/whatsapp/wait-login")
+async def whatsapp_wait_login():
+    try:
+        if not wa_engine.page:
+            return {"connected": False}
+
+        ok = await wa_engine.is_logged_in()
+
+        return {"connected": ok}
+
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+
+# ---------------------------------------------
+# Disconnect
+# ---------------------------------------------
+@app.post("/api/whatsapp/disconnect")
+async def whatsapp_disconnect():
+    try:
+        await wa_engine.close()
+
+        return {"message": "Disconnected"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def process_whatsapp_pdf(file_path):
+    global dashboard_jobs, dashboard_summary
+
+    print(f"Processing: {file_path}")
+
+    try:
+        jobs = extract_jobs_from_pdf(file_path)
+
+        print(f"Jobs found: {len(jobs)}")
+
+        if not jobs:
+            return
+
+        # use saved settings
+        KEYWORDS = DEFAULT_KEYWORDS
+        BLOCK_KEYWORDS = DEFAULT_BLOCK_KEYWORDS
+
+        for j in jobs:
+            text_lower = j["text"].lower()
+
+            hits = [k for k in KEYWORDS if k.lower() in text_lower]
+
+            blocked = [k for k in BLOCK_KEYWORDS if k.lower() in text_lower]
+
+            pct = int((len(hits) / len(KEYWORDS)) * 100) if KEYWORDS else 0
+
+            status = "Rejected"
+            error_reason = ""
+
+            # ---------------------------
+            # BLOCKED KEYWORDS
+            # ---------------------------
+            if blocked:
+                status = "Blocked"
+                error_reason = "Blocked keywords: " + ", ".join(blocked)
+
+            # ---------------------------
+            # LOCATION FILTER
+            # ---------------------------
+            elif not allowed_location(j["location"]):
+                status = "Location Rejected"
+                error_reason = "Location not allowed"
+
+            # ---------------------------
+            # MATCH + EMAIL SEND
+            # ---------------------------
+            elif j["email"] and pct >= MATCH_THRESHOLD:
+                try:
+                    resume_path = os.path.join(UPLOAD_DIR, "default_resume.pdf")
+
+                    send_email(j["email"], j["company"], resume_path)
+
+                    status = "Email Sent"
+
+                    print(f"Applied: {j['company']}")
+
+                except Exception as e:
+                    status = "Failed"
+                    error_reason = str(e)
+
+            else:
+                if not j["email"]:
+                    status = "No Recruiter Email"
+                    error_reason = "No email found"
+                else:
+                    status = "Low Match"
+                    error_reason = f"Threshold {MATCH_THRESHOLD}, got {pct}"
+
+            # ---------------------------
+            # DASHBOARD ENTRY
+            # ---------------------------
+            dashboard_jobs.insert(
+                0,
+                {
+                    "company": j["company"],
+                    "role": j["role"],
+                    "experience": j["experience"],
+                    "location": j["location"],
+                    "email": j["email"],
+                    "match_percent": pct,
+                    "matched_terms": hits,
+                    "blocked_terms": blocked,
+                    "status": status,
+                    "error_reason": error_reason,
+                },
+            )
+
+        # ---------------------------------
+        # KEEP LAST 200 ROWS ONLY
+        # ---------------------------------
+        dashboard_jobs = dashboard_jobs[:200]
+
+        # ---------------------------------
+        # SUMMARY
+        # ---------------------------------
+        total = len(dashboard_jobs)
+
+        applied = len([x for x in dashboard_jobs if x["status"] == "Email Sent"])
+
+        blocked_count = len([x for x in dashboard_jobs if x["status"] == "Blocked"])
+
+        low_match = len([x for x in dashboard_jobs if x["status"] == "Low Match"])
+
+        rejected = total - applied
+
+        dashboard_summary = {
+            "total_jobs": total,
+            "applied": applied,
+            "rejected": rejected,
+            "blocked": blocked_count,
+            "low_match": low_match,
+            "success_rate": int((applied / total) * 100) if total else 0,
+        }
+
+        print("Dashboard updated")
+
+    except Exception as e:
+        print("process_whatsapp_pdf error:", str(e))
+
+
+# ---------------------------------------------
+# Start Watcher
+# ---------------------------------------------
+@app.post("/api/whatsapp/start-watch")
+async def start_watch(contact_name: str = Form(...), interval: int = Form(60)):
+    global watch_task
+
+    if watch_task:
+        watch_task.cancel()
+
+    watch_task = asyncio.create_task(
+        wa_engine.watch_contact(contact_name, interval, process_whatsapp_pdf)
+    )
+
+    return {"message": f"Watching {contact_name}"}
+
+
+# ---------------------------------------------
+# Stop Watcher
+# ---------------------------------------------
+@app.post("/api/whatsapp/stop-watch")
+async def stop_watch():
+    global watch_task
+
+    if watch_task:
+        watch_task.cancel()
+        watch_task = None
+
+    return {"message": "Watcher stopped"}
+
+
+@app.post("/api/upload-resume")
+async def upload_resume(resume: UploadFile = File(...)):
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+        file_path = os.path.join(UPLOAD_DIR, "default_resume.pdf")
+
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(resume.file, f)
+
+        return {"success": True, "message": "Resume uploaded"}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}

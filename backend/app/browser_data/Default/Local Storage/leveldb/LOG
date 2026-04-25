@@ -1,0 +1,6 @@
+2026/04/26-02:43:14.993 86cc Reusing MANIFEST C:\Users\DELL\IdeaProjects\JobPilot\backend\app\browser_data\Default\Local Storage\leveldb/MANIFEST-000001
+2026/04/26-02:43:15.000 86cc Recovering log #13
+2026/04/26-02:43:15.002 86cc Reusing old log C:\Users\DELL\IdeaProjects\JobPilot\backend\app\browser_data\Default\Local Storage\leveldb/000013.log 
+2026/04/26-02:44:15.026 1b14 Level-0 table #17: started
+2026/04/26-02:44:15.044 1b14 Level-0 table #17: 12070 bytes OK
+2026/04/26-02:44:15.047 1b14 Delete type=0 #13
